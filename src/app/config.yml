@@ -1,0 +1,9 @@
+# 基础配置
+BaseConfig:
+  WssEnable: true
+  HttpEnable: false
+## wss配置
+Wss:
+  Url: "ws://127.0.0.1"
+  Port: 8050
+## OpenAI配置
