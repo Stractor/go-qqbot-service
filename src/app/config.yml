@@ -7,3 +7,12 @@ Wss:
   Url: "ws://127.0.0.1"
   Port: 8050
 ## OpenAI配置
+OpenAI:
+  Token: ""
+  Model:
+  RoleList:
+  MaxToken:
+  Temperature:
+  TopP:
+  MaxToken:
+  RemoveTokenWhenExceed:

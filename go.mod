@@ -11,3 +11,5 @@ require (
 	github.com/mitchellh/mapstructure v1.5.0
 	go.uber.org/dig v1.16.1
 )
+
+require github.com/sashabaranov/go-openai v1.5.8
