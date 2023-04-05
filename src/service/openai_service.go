@@ -8,12 +8,11 @@ import (
 )
 
 type OpenAIService struct {
-	client         *openai.Client
-	config         *OpenAIConfig
-	sessions       map[string][]openai.ChatCompletionMessage
-	roleNow        string
-	roleList       map[string]string
-	totalUsageChat map[string]map[string]int
+	client   *openai.Client
+	config   *OpenAIConfig
+	sessions map[string][]openai.ChatCompletionMessage
+	roleNow  string
+	roleList map[string]string
 }
 
 func NewOpenAIService(config *OpenAIConfig) *OpenAIService {
@@ -30,12 +29,15 @@ func NewOpenAIService(config *OpenAIConfig) *OpenAIService {
 }
 
 type OpenAIConfig struct {
-	Model       string
-	Token       string
-	RoleList    map[string]string
-	MaxToken    int
-	Temperature float32
-	TopP        int
+	Model           string
+	Token           string
+	RoleList        map[string]string
+	MaxToken        int
+	Temperature     float32
+	TopP            float32
+	UserMemory      int
+	AssistantMemory int
+	SystemMemory    int
 }
 
 func (service *OpenAIService) ListModel() ([]openai.Model, error) {
@@ -47,15 +49,19 @@ func (service *OpenAIService) ListModel() ([]openai.Model, error) {
 }
 
 // 根据prompt续写
-func (service *OpenAIService) CreateCompletion(prompt string, maxToken int,
-	temperature float32, topP float32) (openai.CompletionChoice, error) {
-	response, err := service.client.CreateCompletion(context.TODO(), openai.CompletionRequest{
-		Model:       service.config.Model,
-		Prompt:      prompt,
-		MaxTokens:   maxToken,
-		Temperature: temperature,
-		TopP:        topP,
-	})
+func (service *OpenAIService) CreateCompletion(prompt string) (openai.CompletionChoice, error) {
+	request := openai.CompletionRequest{
+		Model:     service.config.Model,
+		Prompt:    prompt,
+		MaxTokens: service.config.MaxToken,
+	}
+	if service.config.Temperature > -0.000001 {
+		request.Temperature = service.config.Temperature
+	}
+	if service.config.TopP > -0.000001 {
+		request.TopP = service.config.TopP
+	}
+	response, err := service.client.CreateCompletion(context.TODO(), request)
 	if err != nil {
 		return openai.CompletionChoice{}, err
 	}
@@ -63,7 +69,8 @@ func (service *OpenAIService) CreateCompletion(prompt string, maxToken int,
 }
 
 // sessionID目前打算是群ID/userID+uuid
-func (service *OpenAIService) CreateChatCompletion(sessionID string, message string) (string, error) {
+// 发空消息可以更新初始人设的返回
+func (service *OpenAIService) CreateChatCompletion(sessionID string, gptRole, message string) (string, error) {
 	completionMsg, ok := service.sessions[sessionID]
 	if !ok {
 		completionMsg = []openai.ChatCompletionMessage{}
@@ -77,27 +84,43 @@ func (service *OpenAIService) CreateChatCompletion(sessionID string, message str
 			}
 		}
 	}
-	response, err := service.client.CreateChatCompletion(context.TODO(), openai.ChatCompletionRequest{
-		Model:       service.config.Model,
-		Messages:    completionMsg,
-		MaxTokens:   service.config.MaxToken,
-		Temperature: service.config.Temperature,
-		TopP:        float32(service.config.TopP),
-	})
+	if message != "" {
+		completionMsg = append(completionMsg, openai.ChatCompletionMessage{
+			Role:    gptRole,
+			Content: message,
+		})
+		completionMsg = service.ShortenChatToken(completionMsg, gptRole)
+	}
+	if len(completionMsg) < 1 {
+		return "cmd response: 请发消息", nil
+	}
+	request := openai.ChatCompletionRequest{
+		Model:     service.config.Model,
+		Messages:  completionMsg,
+		MaxTokens: service.config.MaxToken,
+	}
+	if service.config.Temperature > -0.000001 {
+		request.Temperature = service.config.Temperature
+	}
+	if service.config.TopP > -0.000001 {
+		request.TopP = service.config.TopP
+	}
+	response, err := service.client.CreateChatCompletion(context.TODO(), request)
 	if err != nil {
 		return "", err
 	}
-	log.Printf("prompt_token:%d, completion_token:%d, total_token:%d", response.Usage.PromptTokens, response.Usage.CompletionTokens, response.Usage.TotalTokens)
 	completionMsg = append(completionMsg, openai.ChatCompletionMessage{
 		Role:    openai.ChatMessageRoleAssistant,
 		Content: response.Choices[0].Message.Content,
 	})
-	service.RemoveUntilMaxTokenShort(sessionID, response.Usage.PromptTokens, response.Usage.CompletionTokens)
+	completionMsg = service.ShortenChatToken(completionMsg, openai.ChatMessageRoleAssistant)
+
 	service.sessions[sessionID] = completionMsg
 	return response.Choices[0].Message.Content, nil
 }
 
-func (service *OpenAIService) RoleBackMessage(sessionID string) (string, error) {
+// 回滚上句对话，把上一个user对话删除，并删除user对话之后的assistant
+func (service *OpenAIService) RoleBackUserMessage(sessionID string, msg string) (string, error) {
 	completionMsg, ok := service.sessions[sessionID]
 	if !ok {
 		completionMsg = []openai.ChatCompletionMessage{}
@@ -111,21 +134,49 @@ func (service *OpenAIService) RoleBackMessage(sessionID string) (string, error) 
 			}
 		}
 		service.sessions[sessionID] = completionMsg
-		return "你们还没对话过，不用回滚", nil
 	}
-	index := 1
-	length := len(completionMsg)
-	for ; index < length; index++ {
 
-		str := completionMsg[length-index : length-index+1]
-		if str[0].Role == openai.ChatMessageRoleUser {
-			completionMsg = completionMsg[:length-index]
-			service.sessions[sessionID] = completionMsg
-			return service.CreateChatCompletion(sessionID, str[0].Content)
+	endflag := false
+	newCompletionMsg := []openai.ChatCompletionMessage{}
+	for i := len(completionMsg) - 1; i >= 0; i-- {
+		if !endflag && completionMsg[i].Role == openai.ChatMessageRoleUser {
+			endflag = true
+			continue
+		}
+		if !endflag && completionMsg[i].Role == openai.ChatMessageRoleAssistant {
+			continue
+		}
+		newCompletionMsg = append(newCompletionMsg, completionMsg[i])
+	}
+	if endflag {
+		service.sessions[sessionID] = newCompletionMsg
+		return service.CreateChatCompletion(sessionID, openai.ChatMessageRoleUser, msg)
+	}
+	log.Printf("找不到第一条user类型的消息，无法回滚")
+	return "cmd response: 找不到第一条user类型的消息，无法回滚", nil
+}
+
+// 回滚system角色的消息
+func (service *OpenAIService) RoleBackSystemMessage(sessionID string, msg string) (string, error) {
+	completionMsg, ok := service.sessions[sessionID]
+	if !ok || len(completionMsg) < 1 {
+		return "cmd response: 系统现在没有人设", nil
+	}
+
+	endflag := false
+	for i := len(completionMsg) - 1; i >= 0; i-- {
+		if !endflag && completionMsg[i].Role == openai.ChatMessageRoleSystem {
+			endflag = true
+			service.removeElement(completionMsg, i)
+			break
 		}
 	}
-	log.Printf("找不到第一条user类型的消息")
-	return "会话出错，请重试", nil
+	if endflag {
+		service.sessions[sessionID] = completionMsg
+		return service.CreateChatCompletion(sessionID, openai.ChatMessageRoleSystem, msg)
+	}
+	log.Printf("找不到设定，无法回滚")
+	return "cmd response: 找不到设定，无法回滚", nil
 }
 
 func (service *OpenAIService) ChangeRole(name string, userID string) {
@@ -136,30 +187,41 @@ func (service *OpenAIService) QueryRoleList(userID string) map[string]string {
 	return service.roleList
 }
 
-func (service *OpenAIService) RemoveUntilMaxTokenShort(sessionID string, prompt, completion int) {
-	// // fixme: 用量要重新计算，对接
-	// usages, ok := service.totalUsageChat[sessionID]
-	// if !ok {
-	// 	usages = map[string]int{
-	// 		"prompt":     prompt,
-	// 		"completion": completion,
-	// 		"total":      prompt + completion,
-	// 	}
-	// 	service.totalUsageChat[sessionID] = usages
-	// }
-	// if usages["total"] < service.config.MaxToken {
-	// 	return
-	// }
-	// completionMsg, ok := service.sessions[sessionID]
-	// if !ok {
-	// 	log.Fatalf("出错了，检查一下:%s %d:%d", sessionID, prompt, completion)
-	// }
-	// count := 3
-	// newCompletionMsg := []openai.ChatCompletionMessage{}
-	// for _, v := range completionMsg {
-	// 	if v.Role != openai.ChatMessageRoleSystem && count > 0 {
-	// 		continue
-	// 	}
-	// 	newCompletionMsg = append(newCompletionMsg, v)
-	// }
+// 减少某个role的聊天记录，用于节省token花费
+func (service *OpenAIService) ShortenChatToken(messages []openai.ChatCompletionMessage, gptRole string) []openai.ChatCompletionMessage {
+	n, i := service.returnNumAndFirstIndex(messages, gptRole)
+	switch gptRole {
+	case openai.ChatMessageRoleAssistant:
+		if n > 0 && n > service.config.AssistantMemory {
+			messages = service.removeElement(messages, i)
+		}
+	case openai.ChatMessageRoleUser:
+		if n > 0 && n > service.config.UserMemory {
+			messages = service.removeElement(messages, i)
+		}
+	case openai.ChatMessageRoleSystem:
+		if n > 0 && n > service.config.SystemMemory {
+			messages = service.removeElement(messages, i)
+		}
+	}
+	return messages
+}
+
+func (service *OpenAIService) returnNumAndFirstIndex(arr []openai.ChatCompletionMessage, gptRole string) (int, int) {
+	n := 0
+	s := 999
+	for i := len(arr) - 1; i >= 0; i-- {
+		if arr[i].Role == gptRole {
+			n++
+			s = i
+		}
+	}
+	return n, s
+}
+
+func (service *OpenAIService) removeElement(arr []openai.ChatCompletionMessage, p int) []openai.ChatCompletionMessage {
+	newArr := make([]openai.ChatCompletionMessage, 0, len(arr)-1)
+	newArr = append(newArr, arr[:p]...)
+	newArr = append(newArr, arr[p+1:]...)
+	return newArr
 }

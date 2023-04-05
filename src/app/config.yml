@@ -8,11 +8,12 @@ Wss:
   Port: 8050
 ## OpenAI配置
 OpenAI:
-  Token: ""
-  Model:
-  RoleList:
-  MaxToken:
-  Temperature:
-  TopP:
-  MaxToken:
-  RemoveTokenWhenExceed:
+  Token: "" # todo: 把token移动到个人化配置中，防止提交到git
+  Model: "gpt-3.5-turbo"
+  RoleList: # todo: 角色列表也放到个人化配置中
+  MaxToken: 4096
+  Temperature: -1  #小于0就是默认
+  TopP: -1
+	UserMemory: 6
+	AssistantMemory: 6
+	SystemMemory: 4
