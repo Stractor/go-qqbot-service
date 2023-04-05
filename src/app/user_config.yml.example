@@ -1,0 +1,13 @@
+# 把这个文件的文件名后缀的.example去掉，然后填自己的设定
+Role:
+  DefaultRole: 人设1 #DefaultRole的名字必须和下面list的其中一个相同
+  RoleList: #人设可以是数组
+    人设1:
+      - "你是张三"
+      - "你来自火星"
+    人设2:
+      - ""
+    人设3:
+      - ""
+OpenAI:
+    Token: "sk-123456789ABCDEFG" # todo: 把token移动到个人化配置中，防止提交到git

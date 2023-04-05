@@ -8,12 +8,46 @@ Wss:
   Port: 8050
 ## OpenAI配置
 OpenAI:
-  Token: "" # todo: 把token移动到个人化配置中，防止提交到git
   Model: "gpt-3.5-turbo"
-  RoleList: # todo: 角色列表也放到个人化配置中
   MaxToken: 4096
   Temperature: -1  #小于0就是默认
   TopP: -1
-	UserMemory: 6
-	AssistantMemory: 6
-	SystemMemory: 4
+  UserMemory: 6
+  AssistantMemory: 6
+  SystemMemory: 4
+QQBot:
+  CmdPrefix: "/"
+  CmdList:
+    - Name: help
+      Func: help
+      Desc: 介绍机器人支持的所有命令
+    - Name: 切换人设
+      Func: changeRole
+      Desc: 输入人设的名字；如果不输入名字或者切换到不存在的人设，就会创建一个空白人设
+    - Name: 人设列表
+      Func: roleList
+      Desc: 返回当前可以切换的人设列表
+    - Name: 保存人设
+      Func: saveRoleList
+      Desc: 把人设保存到列表，让更多人使用；需要传递人设名
+    - Name: 全部重置
+      Func: resetSession
+      Desc: 重置当前会话为初始状态，人设也会删除
+    - Name: 重发人设
+      Func: rollbackSystem
+      Desc: 回滚最后一条设定；需要把回滚后重发的内容一起发出来
+    - Name: 重发
+      Func: rollbackUser
+      Desc: 回滚最后一条会话；需要把回滚后重发的内容一起发出来
+    - Name: 当前人设
+      Func: describeCurrentSession
+      Desc: 返回当前的人设名、所有设定
+    - Name: 添加设定
+      Func: addSystemMsg
+      Desc: 为当前角色增加设定
+    - Name: 重置会话
+      Func: clearUserMsg
+      Desc: 清空用户会话，只留人设
+    - Name: 发送消息到gpt
+      Func: addUserMsg
+      Desc: 如果不带命令，就会自动调用这个方法

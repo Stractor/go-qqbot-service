@@ -9,11 +9,14 @@ import (
 )
 
 func main() {
-	print("main start")
+	println("main start")
 
 	container := dig.New()
 	service.BindConfig(container, "Wss", &controller.WssConfig{})
-	err := service.BindConfig(container, "OpenAI", &service.OpenAIConfig{})
+	service.BindConfig(container, "OpenAI", &service.OpenAIConfig{})
+	service.BindConfig(container, "QQBot", &service.QQBotActionConfig{})
+	service.BindPrivicyConfig(container, "OpenAI", &service.PrivacyConfig{})
+	err := service.BindPrivicyConfig(container, "Role", &service.RoleConfig{})
 	if err != nil {
 		fmt.Printf("bind config error: %s", err)
 		return
@@ -21,6 +24,7 @@ func main() {
 
 	container.Provide(controller.NewController)
 	container.Provide(service.NewOpenAIService)
+	container.Provide(service.NewBotActionService)
 
 	err = container.Invoke(func(ctr *controller.Controller) {
 		ctr.Start()

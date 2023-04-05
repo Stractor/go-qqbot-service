@@ -12,14 +12,20 @@ import (
 )
 
 type Controller struct {
-	config *WssConfig
+	config          *WssConfig
+	actionService   *service.BotActionService
+	botActionConfig *service.QQBotActionConfig
 }
 
 func NewController(
 	config *WssConfig,
+	actionService *service.BotActionService,
+	botActionConfig *service.QQBotActionConfig,
 ) *Controller {
 	return &Controller{
-		config: config,
+		config:          config,
+		actionService:   actionService,
+		botActionConfig: botActionConfig,
 	}
 }
 
@@ -49,44 +55,12 @@ func (ctr *Controller) Start() {
 			log.Println("read:", err)
 			return
 		}
-		fmt.Printf("Received message: %s\n", message)
-		ctr.handleMessage(message)
+		// fmt.Printf("Received message: %s\n", message)
+		go ctr.handleMessage(conn, message)
 	}
-
-	// // 发送消息
-	// ticker := time.NewTicker(1 * time.Second)
-	// defer ticker.Stop()
-
-	// for {
-	// 	select {
-	// 	case <-done:
-	// 		return
-	// 	case t := <-ticker.C:
-	// 		err := conn.WriteMessage(websocket.TextMessage, []byte(t.String()))
-	// 		if err != nil {
-	// 			log.Println("write:", err)
-	// 			return
-	// 		}
-	// 		fmt.Printf("Sent message: %s\n", t.String())
-	// 	case <-interrupt:
-	// 		log.Println("interrupt")
-
-	// 		// 优雅地关闭连接
-	// 		err := conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
-	// 		if err != nil {
-	// 			log.Println("write close:", err)
-	// 			return
-	// 		}
-	// 		select {
-	// 		case <-done:
-	// 		case <-time.After(time.Second):
-	// 		}
-	// 		return
-	// 	}
-	// }
 }
 
-func (ctr *Controller) handleMessage(byteMsg []byte) error {
+func (ctr *Controller) handleMessage(conn *websocket.Conn, byteMsg []byte) error {
 	var msg service.QQMessageType
 	err := json.Unmarshal(byteMsg, &msg)
 	if err != nil {
@@ -94,10 +68,37 @@ func (ctr *Controller) handleMessage(byteMsg []byte) error {
 		return err
 	}
 	if service.QQ_MSG_POST_TYPE(msg.PostType) == service.POST_TYPE_MESSAGE {
+		fmt.Printf("Received message: %s\n", string(byteMsg))
 		switch service.QQ_MSG_MESSAGE_TYPE(msg.MessageType) {
 		case service.MESSAGE_TYPE_GROUP:
 		case service.MESSAGE_TYPE_PRIVATE:
+			finalMsg := msg.Message
+			if msg.Message[0:1] != ctr.botActionConfig.CmdPrefix {
+				finalMsg = fmt.Sprintf("%s发送消息到gpt %s", ctr.botActionConfig.CmdPrefix, msg.Message)
+			}
+			ctr.pushMessageBackToQQ(conn, service.MESSAGE_TYPE_PRIVATE, msg.UserID,
+				ctr.actionService.TriggerCmd(finalMsg, map[string]interface{}{
+					"userID": msg.UserID,
+				}))
 		}
 	}
+	return nil
+}
+
+func (ctr *Controller) pushMessageBackToQQ(conn *websocket.Conn, messageType service.QQ_MSG_MESSAGE_TYPE, userID int64, message string) error {
+	sendMsg, err := json.Marshal(service.QQMessageSendModel{
+		Action: "send_private_msg",
+		Params: service.QQMessageSendDetail{
+			MessageType: messageType,
+			UserId:      userID,
+			Message:     message,
+		},
+	})
+	err = conn.WriteMessage(websocket.TextMessage, sendMsg)
+	if err != nil {
+		log.Printf("发送消息到出错，消息内容：%s\n错误是：%s", sendMsg, err)
+		return err
+	}
+	fmt.Printf("Sent message: %s\n", string(sendMsg))
 	return nil
 }

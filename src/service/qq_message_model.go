@@ -1,7 +1,5 @@
 package service
 
-type QQbotService struct{}
-
 type QQ_MSG_POST_TYPE string
 
 const (
@@ -52,8 +50,13 @@ type QQMessageSender struct {
 	UserID   int64  `json:"user_id"`
 }
 
-type QQBotCommandType struct {
-	Cmd    string
-	Param  string
-	Action func(string, string)
+type QQMessageSendModel struct {
+	Action string              `json:"action"`
+	Params QQMessageSendDetail `json:"params"`
+}
+
+type QQMessageSendDetail struct {
+	MessageType QQ_MSG_MESSAGE_TYPE `json:"message_ype"`
+	UserId      int64               `json:"user_id"`
+	Message     string              `json:"message"`
 }
